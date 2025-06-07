@@ -1,0 +1,5 @@
+{
+  "name": "Hybrid Engine Dashboard",
+  "description": "A web application to monitor and manage workflows for the Hybrid Engine, a personal cognitive mesh system. It provides insights into workflow status, step execution, and overall system metrics.",
+  "requestFramePermissions": []
+}
