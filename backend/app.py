@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from models.workflow import Workflow, JobStatus, WorkflowStep
@@ -365,6 +365,48 @@ async def resume_workflow(workflow_id: str) -> Workflow:
         logger.error(f"Error resuming workflow {workflow_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error resuming workflow: {str(e)}")
 
-app.include_router(router)
+@router.post("/workflows/from-template", status_code=201)
+async def create_workflow_from_template(
+    template_id: str = Body(...),
+    params: dict = Body(...)
+) -> Workflow:
+    """Create a workflow from a template, set prompt/input in step params, and queue initial job."""
+    try:
+        workflow_id = generate_workflow_id()
+        current_time = datetime.now()
+        # For demo: Simulate a template with a single LLM step. In production, load template from DB or file.
+        # The key is to set the prompt/input in params or metadata for the step.
+        initial_step = WorkflowStep(
+            id=f"step_{uuid.uuid4().hex[:8]}",
+            name=f"LLM Step from {template_id}",
+            action="gemini_chat",  # Or use template-defined action
+            status=JobStatus.PENDING,
+            dependencies=[],
+            logs=[f"Created from template {template_id} at {current_time.isoformat()}"],
+            params={"prompt": params.get("prompt", "")},
+            metadata={}
+        )
+        workflow = Workflow(
+            id=workflow_id,
+            name=f"Workflow from {template_id}",
+            description=f"Created from template {template_id} with params: {params}",
+            status=JobStatus.PENDING,
+            steps=[initial_step],
+            createdAt=current_time,
+            updatedAt=current_time,
+            progress=0
+        )
+        state_manager = StateManager(workflow_id)
+        state_manager.write(workflow)
+        # Queue the initial step
+        queue.add({"workflow_id": workflow_id, "node_id": initial_step.id})
+        initial_step.status = JobStatus.WAITING_FOR_DEPENDENCY
+        initial_step.logs.append(f"Queued at {datetime.now().isoformat()} as it has no dependencies.")
+        state_manager.write(workflow)
+        logger.info(f"Workflow {workflow_id} created from template {template_id} and initial step queued.")
+        return workflow
+    except Exception as e:
+        logger.error(f"Failed to create workflow from template: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create workflow from template: {str(e)}")
 
 app.include_router(router)

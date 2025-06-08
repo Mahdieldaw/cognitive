@@ -1,4 +1,3 @@
-
 import { Workflow, WorkflowStep, JobStatus, DashboardSummaryData, WorkflowTemplate, ApiError } from '../types';
 import { API_BASE_URL } from '../constants';
 
@@ -89,27 +88,17 @@ export const getWorkflowById = async (id: string): Promise<Workflow | undefined>
 };
 
 export const createWorkflowFromTemplate = async (templateId: string, params: Record<string, any>): Promise<Workflow> => {
-  console.log(`Creating workflow from template ${templateId} with params:`, params);
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const template = mockTemplates.find(t => t.id === templateId);
-      if (!template) throw new Error('Template not found');
-      const newWorkflow: Workflow = {
-        id: `wf_${Date.now().toString().slice(-5)}`,
-        name: `${template.name} (Instance)`,
-        status: JobStatus.PENDING,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        description: `Workflow created from template: ${template.name}. Input params: ${JSON.stringify(params)}`,
-        steps: [ // Simplified for mock
-            { id: 's1', name: 'Initialize from Template', action: 'template_init', status: JobStatus.PENDING, dependencies: [] }
-        ],
-        progress: 0,
-      };
-      mockWorkflows.unshift(newWorkflow); // Add to the top for visibility
-      resolve(JSON.parse(JSON.stringify(newWorkflow)));
-    }, MOCK_API_DELAY);
+  // Use real API call
+  const response = await fetch(`${API_BASE_URL}/workflows/from-template`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template_id: templateId, params }),
   });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to create workflow from template');
+  }
+  return response.json();
 };
 
 export const createWorkflowBranch = async (workflowId: string, branchName: string): Promise<{ workflowId: string; branchName: string; newWorkflowId: string }> => {
