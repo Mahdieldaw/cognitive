@@ -1,5 +1,10 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
+import { fileURLToPath } from 'url';
+
+// Modern way to get __dirname in an ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');

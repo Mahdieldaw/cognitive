@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from models.workflow import Workflow, JobStatus, WorkflowStep
 from datetime import datetime
@@ -30,6 +31,22 @@ async def lifespan(app: FastAPI):
             pass
 
 app = FastAPI(title="Hybrid Engine Backend", lifespan=lifespan)
+
+# Add CORS middleware
+origins = [
+    "http://localhost",
+    "http://localhost:5173",  # Default Vite dev server port
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 router = APIRouter(prefix="/api")
 
 @router.get("/health")
