@@ -5,8 +5,35 @@ from services.state_manager import StateManager
 from models.workflow import JobStatus
 from loguru import logger
 from backend.config import settings
-from backend.adapters import deepseek_adapter, gemini_adapter
+from backend.adapters.openai_adapter import OpenAIAdapter
+from backend.adapters.deepseek_adapter import DeepSeekAdapter # Assuming this will be updated or created similarly
+from backend.adapters.gemini_adapter import GeminiAdapter   # Assuming this will be updated or created similarly
 import httpx
+
+# Initialize adapters
+# Ensure API keys are handled securely, e.g., via environment variables loaded into settings
+adapters = {}
+if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "your_api_key_here":
+    adapters["openai_chat"] = OpenAIAdapter(settings.OPENAI_API_KEY)
+else:
+    logger.warning("OpenAI API key not configured. OpenAI adapter will not be available.")
+
+if settings.DEEPSEEK_API_KEY and settings.DEEPSEEK_API_KEY != "your_api_key_here":
+    # Assuming DeepSeekAdapter is updated to match BaseAdapter interface
+    # adapters["deepseek_chat"] = DeepSeekAdapter(settings.DEEPSEEK_API_KEY) 
+    # For now, let's keep the old way if it's not updated yet, or comment out
+    pass # Placeholder for DeepSeekAdapter instantiation if it's updated
+else:
+    logger.warning("DeepSeek API key not configured. DeepSeek adapter will not be available.")
+
+if settings.GOOGLE_API_KEY and settings.GOOGLE_API_KEY != "your_api_key_here":
+    # Assuming GeminiAdapter is updated to match BaseAdapter interface
+    # adapters["gemini_chat"] = GeminiAdapter(settings.GOOGLE_API_KEY)
+    # For now, let's keep the old way if it's not updated yet, or comment out
+    pass # Placeholder for GeminiAdapter instantiation if it's updated
+else:
+    logger.warning("Google API key not configured. Gemini adapter will not be available.")
+
 
 def calculate_duration(start_time: datetime, end_time: datetime) -> str:
     """Calculate human-readable duration string"""
@@ -34,57 +61,58 @@ def calculate_workflow_progress(workflow) -> int:
     return int((completed_steps / total_steps) * 100)
 
 async def execute_node(node_id: str, action: str, params: dict) -> tuple[any, str | None, dict | None]:
-    """Execute a node by routing to the correct adapter based on the action."""
+    """Execute node using appropriate adapter."""
     logger.info(f"Executing node {node_id} with action '{action}'")
-    prompt = params.get("prompt", "Default prompt") # Assume prompt is passed in params
-
-    if action == "deepseek_chat":
+    
+    if action in adapters:
+        adapter = adapters[action]
+        prompt = params.get("prompt", "") # Default to empty string if no prompt
+        # Pass all other params from the node's params to the adapter's execute method
+        # The adapter's execute method will pick the kwargs it needs (e.g., model, temperature)
+        model_params = {k: v for k, v in params.items() if k != "prompt"}
+        
+        try:
+            result = await adapter.execute(prompt, **model_params)
+            return result.get("output"), result.get("error"), result.get("metadata")
+        except Exception as e:
+            logger.error(f"Error executing adapter for action {action}: {e}", exc_info=True)
+            return None, f"Adapter execution failed: {str(e)}", {"action": action}
+    # Fallback for existing non-adapter based actions or if adapters are not fully refactored yet
+    elif action == "deepseek_chat": # Keep old logic if DeepSeekAdapter not yet refactored
         if not settings.DEEPSEEK_API_KEY or settings.DEEPSEEK_API_KEY == "your_api_key_here":
             logger.error("DEEPSEEK_API_KEY is not configured. Please set it in the .env file.")
             return None, "DEEPSEEK_API_KEY not configured", {}
         try:
-            result = await deepseek_adapter.execute(prompt=prompt)
+            # This assumes deepseek_adapter.execute exists and has a compatible signature
+            # If DeepSeekAdapter class is used, this block should be removed or refactored
+            from backend.adapters import deepseek_adapter as old_deepseek_adapter # avoid name clash
+            result = await old_deepseek_adapter.execute(prompt=params.get("prompt", ""))
             return result.get("output"), result.get("error"), result.get("metadata")
         except httpx.ConnectError as e:
             logger.error(f"Connection error during DeepSeek API call: {e}")
             return None, f"DeepSeek API connection error: {e}", {}
         except Exception as e:
-            logger.error(f"Error executing DeepSeek adapter: {e}")
+            logger.error(f"Error executing (old) DeepSeek adapter: {e}")
             return None, str(e), {}
-    elif action == "gemini_chat":
+    elif action == "gemini_chat": # Keep old logic if GeminiAdapter not yet refactored
         try:
-            # Extract model_name and other generation parameters from node.params
-            model_name = params.get("model", "gemini-1.5-flash") # Default to 1.5 flash
-            # Pass all other params as kwargs to the adapter, which will pick the relevant ones
+            from backend.adapters import gemini_adapter as old_gemini_adapter # avoid name clash
+            model_name = params.get("model", "gemini-1.5-flash")
             generation_params = {k: v for k, v in params.items() if k not in ["prompt", "model"]}
-            
-            result = await gemini_adapter.execute(
-                prompt=prompt, 
+            result = await old_gemini_adapter.execute(
+                prompt=params.get("prompt", ""), 
                 model_name=model_name, 
                 **generation_params
             )
             return result.get("output"), result.get("error"), result.get("metadata")
         except Exception as e:
-            # The adapter now includes more specific error handling, 
-            # but we catch any other unexpected errors here.
-            logger.error(f"Error executing Gemini adapter from worker: {e}")
+            logger.error(f"Error executing (old) Gemini adapter: {e}")
             return None, str(e), {"model_name": params.get("model", "gemini-1.5-flash")}
-    # Add other adapters here in the future
-    # elif action == "gemini_text_model":
-    #     # ... logic for Gemini ...
-    #     pass
     else:
-        # Fallback for unknown action or simulation for other actions
-        logger.warning(f"Unknown or unhandled action: {action}. Simulating execution.")
-        await asyncio.sleep(2)  # Simulate work for unknown actions
-        output_sim = {
-            "result": "simulated_success",
-            "action": action,
-            "processed_at": datetime.now().isoformat(),
-            "node_id": node_id,
-            "message": f"Action '{action}' simulated as no specific adapter is configured."
-        }
-        return output_sim, None, {"simulated": True}
+        # Fallback for unknown actions or simulation
+        logger.warning(f"Unknown action: {action}, or adapter not available/configured. Simulating execution.")
+        await asyncio.sleep(1) # Simulate work
+        return {"simulated": True, "message": f"Action '{action}' simulated."}, None, {"action": action, "simulated": True}
 
 async def run_worker():
     """Main worker loop"""
@@ -161,6 +189,41 @@ fdx                node = next((n for n in workflow.steps if n.id == node_id), N
                         node.outputs = output
                         node.logs.append(f"Completed successfully at {node.endTime.isoformat()}")
                         
+                        # Store execution metrics from metadata
+                        if metadata:
+                            node.execution_metrics = {
+                                "tokens": metadata.get("tokens", 0),
+                                "cost": metadata.get("cost", 0.0),
+                                "model": metadata.get("model", "unknown"),
+                                "duration_ms": metadata.get("duration_ms", 0)
+                                # Add any other relevant metrics from metadata
+                            }
+                        
+                        # Aggregate workflow metrics
+                        total_tokens = sum(
+                            s.execution_metrics.get("tokens", 0) 
+                            for s in workflow.steps if s.execution_metrics
+                        )
+                        total_cost = sum(
+                            s.execution_metrics.get("cost", 0.0) 
+                            for s in workflow.steps if s.execution_metrics
+                        )
+                        
+                        workflow.metrics = {
+                            "total_tokens": total_tokens,
+                            "total_cost": total_cost,
+                            "completed_steps": len([s for s in workflow.steps if s.status == JobStatus.COMPLETED])
+                            # Add other aggregated metrics as needed
+                        }
+                        
+                        # Cost breakdown by model
+                        cost_by_model = {}
+                        for step_in_wf in workflow.steps:
+                            if step_in_wf.execution_metrics and "model" in step_in_wf.execution_metrics:
+                                model_name = step_in_wf.execution_metrics["model"]
+                                cost_by_model[model_name] = cost_by_model.get(model_name, 0.0) + step_in_wf.execution_metrics.get("cost", 0.0)
+                        workflow.cost_breakdown = cost_by_model
+
                         completed_step_ids = {s.id for s in workflow.steps if s.status == JobStatus.COMPLETED}
                         logger.info(f"Node {node_id} completed. Checking for dependent nodes to queue. Completed IDs: {completed_step_ids}")
                         for next_step in workflow.steps:

@@ -12,11 +12,19 @@ from config import settings
 from services.state_manager import StateManager
 from services.queue_service import queue
 from worker import run_worker
+from recovery_manager import RecoveryManager
+from models.external_data import ExternalDataRequest, ExternalDataResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize worker
+    # Startup: Initialize worker and recovery manager
     logger.info("Starting Hybrid Engine Backend")
+
+    # Initialize Recovery Manager
+    recovery_manager = RecoveryManager()
+    await recovery_manager.check_and_recover_orphans()
+    await recovery_manager.cleanup_stale_queue_items()
+
     worker_task = asyncio.create_task(run_worker())
     
     try:
@@ -194,6 +202,117 @@ async def stop_workflow(workflow_id: str) -> Workflow:
     except Exception as e:
         logger.error(f"Error stopping workflow {workflow_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error stopping workflow: {str(e)}")
+
+@router.post("/workflows/{workflow_id}/external-data")
+async def add_external_data(workflow_id: str, request: ExternalDataRequest) -> ExternalDataResponse:
+    """Add external data to workflow and trigger dependent steps."""
+    try:
+        # Load target workflow
+        state_manager = StateManager(workflow_id)
+        if not state_manager.exists():
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        workflow = state_manager.get()
+        
+        # Create new step for external data
+        step_id = f"ext_{uuid.uuid4().hex[:8]}"
+        current_time = datetime.now()
+        
+        external_step = WorkflowStep(
+            id=step_id,
+            name=request.step_name or f"External Data from {request.source_url or 'Browser'}",
+            action=request.action_type,
+            status=JobStatus.COMPLETED,  # Immediately completed
+            dependencies=[],  # External data has no dependencies
+            outputs={
+                "content": request.content,
+                "source_url": str(request.source_url) if request.source_url else None,
+                "content_type": request.content_type,
+                "captured_at": current_time.isoformat()
+            },
+            startTime=current_time,
+            endTime=current_time,
+            duration="0 sec",
+            logs=[f"External data ingested at {current_time.isoformat()}"],
+            metadata=request.metadata or {},
+            params={"source": "browser_extension"}
+        )
+        
+        # Add step to workflow
+        workflow.steps.append(external_step)
+        workflow.updatedAt = current_time
+        
+        # Find and queue dependent steps
+        completed_step_ids = {s.id for s in workflow.steps if s.status == JobStatus.COMPLETED}
+        queued_dependents = 0
+        
+        for step in workflow.steps:
+            if (step.status == JobStatus.PENDING and 
+                step.dependencies and 
+                set(step.dependencies).issubset(completed_step_ids)):
+                
+                # Check if already queued
+                job_key = f"{workflow_id}/{step.id}"
+                is_queued = any(
+                    f"{j['workflow_id']}/{j['node_id']}" == job_key 
+                    for j in queue.queue if hasattr(queue, 'queue')
+                )
+                
+                if not is_queued:
+                    queue.add({"workflow_id": workflow_id, "node_id": step.id})
+                    step.status = JobStatus.WAITING_FOR_DEPENDENCY
+                    step.logs = step.logs or []
+                    step.logs.append(f"Queued due to external data dependency satisfaction at {current_time.isoformat()}")
+                    queued_dependents += 1
+        
+        # Update workflow progress
+        completed_count = len([s for s in workflow.steps if s.status == JobStatus.COMPLETED])
+        workflow.progress = int((completed_count / len(workflow.steps)) * 100) if workflow.steps else 0
+        
+        # Set workflow status to RUNNING if it was PENDING and now has queued items
+        if workflow.status == JobStatus.PENDING and queued_dependents > 0:
+            workflow.status = JobStatus.RUNNING
+        
+        # Save updated workflow
+        state_manager.write(workflow)
+        
+        logger.info(f"External data added to workflow {workflow_id}: step {step_id}, {queued_dependents} dependents queued")
+        
+        return ExternalDataResponse(
+            step_id=step_id,
+            workflow_id=workflow_id,
+            queued_dependents=queued_dependents,
+            status="success"
+        )
+    
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error adding external data to workflow {workflow_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add external data: {str(e)}")
+
+@router.get("/workflows/{workflow_id}/external-data")
+async def get_external_data_steps(workflow_id: str):
+    """Get all external data steps for a workflow."""
+    try:
+        state_manager = StateManager(workflow_id)
+        if not state_manager.exists():
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        workflow = state_manager.get()
+        external_steps = [
+            step for step in workflow.steps 
+            if step.action == "external_data" or step.params.get("source") == "browser_extension"
+        ]
+        
+        return {
+            "workflow_id": workflow_id,
+            "external_steps": external_steps,
+            "count": len(external_steps)
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving external data steps: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/workflows/{workflow_id}/resume")
 async def resume_workflow(workflow_id: str) -> Workflow:

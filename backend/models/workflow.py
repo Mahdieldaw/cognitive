@@ -25,6 +25,7 @@ class WorkflowStep(BaseModel):
     duration: Optional[str] = None  # "1 min 30 sec"
     logs: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+    execution_metrics: Optional[Dict[str, Any]] = None  # Detailed metrics
     on_failure: Optional[str] = 'stop_workflow' # Literal['stop_workflow', 'continue'] - Pydantic v1 doesn't easily support Literal with str, Enum
     params: Optional[Dict[str, Any]] = None
 
@@ -40,4 +41,5 @@ class Workflow(BaseModel):
     progress: Optional[int] = Field(None, ge=0, le=100)
     parentId: Optional[str] = None
     branches: Optional[List[Dict[str, str]]] = None
-    metrics: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = None  # Aggregated workflow metrics
+    cost_breakdown: Optional[Dict[str, float]] = None  # Cost per model/step
