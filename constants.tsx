@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 export const API_BASE_URL = '/api'; // Mock API base URL, or configure via ENV
@@ -84,3 +83,5 @@ export const BeakerIcon: React.FC<{className?: string}> = ({ className = "w-6 h-
   <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75h.008v.008H12v-.008Z" />
 </svg>
 );
+
+// API_BASE_URL is correctly pointing to '/api'
