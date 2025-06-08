@@ -64,7 +64,75 @@ class OpenAIAdapter(BaseAdapter):
                 "error": str(e),
                 "metadata": {"model": model, "error_type": type(e).__name__}
             }
+import json
+import asyncio
+from typing import Dict, Any, Optional
+import httpx
+from loguru import logger
+from ..config import settings
 
+class OpenAIAdapter:
+    """
+    Adapter for OpenAI API.
+    """
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.openai.com/v1"
+    
+    async def process(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a request to OpenAI API.
+        
+        Args:
+            params: Dictionary containing parameters for the request
+                - prompt: The prompt to send to the model
+                - model: The model to use (optional, defaults to gpt-3.5-turbo)
+                - max_tokens: Maximum tokens to generate (optional)
+        
+        Returns:
+            Dictionary containing:
+            - output: The model's response
+            - error: Error message if any (None if successful)
+            - metadata: Additional information like token count, cost, etc.
+        """
+        try:
+            # For simulation purposes
+            logger.info(f"Simulating OpenAI API call with params: {params}")
+            await asyncio.sleep(1)  # Simulate API call delay
+            
+            # Extract parameters
+            prompt = params.get("prompt", "")
+            model = params.get("model", "gpt-3.5-turbo")
+            
+            # Simulate a response
+            simulated_response = {
+                "text": f"Simulated OpenAI response for: {prompt[:50]}...",
+                "model": model,
+                "id": "sim_response_123"
+            }
+            
+            # Prepare metadata
+            metadata = {
+                "model": model,
+                "tokens": len(prompt.split()) * 2,  # Simple token estimation
+                "cost": 0.002,  # Simulated cost
+                "simulated": True
+            }
+            
+            return {
+                "output": simulated_response,
+                "error": None,
+                "metadata": metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in OpenAI adapter: {e}")
+            return {
+                "output": {},
+                "error": str(e),
+                "metadata": {"error": True}
+            }
     def calculate_cost(self, tokens: int, model: str) -> float:
         # Placeholder for actual cost calculation logic
         # This should be based on OpenAI's pricing for the specific model

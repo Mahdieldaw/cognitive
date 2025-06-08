@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from models.workflow import Workflow
-from config import settings
+from ..models.workflow import Workflow
+from ..config import settings
 from loguru import logger
 
 class StateManager:

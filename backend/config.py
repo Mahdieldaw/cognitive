@@ -8,7 +8,8 @@ class Settings:
     QUEUE_STATE_FILE = os.getenv("QUEUE_STATE_FILE", "queue-state.json")
     MAX_PARALLEL_NODES = int(os.getenv("MAX_PARALLEL_NODES", "4"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY"))  # Support both naming conventions
 
 settings = Settings()

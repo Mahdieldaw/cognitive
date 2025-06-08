@@ -1,38 +1,77 @@
 import asyncio
 from datetime import datetime
-from services.queue_service import queue
-from services.state_manager import StateManager
-from models.workflow import JobStatus
+from .services.queue_service import queue
+from .services.state_manager import StateManager
+from .models.workflow import JobStatus
 from loguru import logger
-from backend.config import settings
-from backend.adapters.openai_adapter import OpenAIAdapter
-from backend.adapters.deepseek_adapter import DeepSeekAdapter # Assuming this will be updated or created similarly
-from backend.adapters.gemini_adapter import GeminiAdapter   # Assuming this will be updated or created similarly
+from .config import settings
 import httpx
+
+# Import adapters with try-except to handle missing modules
+try:
+    from .adapters.openai_adapter import OpenAIAdapter
+    has_openai = True
+except ImportError:
+    logger.warning("OpenAI adapter not found or could not be imported.")
+    has_openai = False
+
+try:
+    from .adapters.deepseek_adapter import DeepSeekAdapter
+    has_deepseek = True
+except ImportError:
+    logger.warning("DeepSeek adapter not found or could not be imported.")
+    has_deepseek = False
+
+try:
+    from .adapters.gemini_adapter import GeminiAdapter
+    has_gemini = True
+except ImportError:
+    logger.warning("Gemini adapter not found or could not be imported.")
+    has_gemini = False
 
 # Initialize adapters
 # Ensure API keys are handled securely, e.g., via environment variables loaded into settings
 adapters = {}
-if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "your_api_key_here":
-    adapters["openai_chat"] = OpenAIAdapter(settings.OPENAI_API_KEY)
-else:
-    logger.warning("OpenAI API key not configured. OpenAI adapter will not be available.")
 
-if settings.DEEPSEEK_API_KEY and settings.DEEPSEEK_API_KEY != "your_api_key_here":
-    # Assuming DeepSeekAdapter is updated to match BaseAdapter interface
-    # adapters["deepseek_chat"] = DeepSeekAdapter(settings.DEEPSEEK_API_KEY) 
-    # For now, let's keep the old way if it's not updated yet, or comment out
-    pass # Placeholder for DeepSeekAdapter instantiation if it's updated
-else:
-    logger.warning("DeepSeek API key not configured. DeepSeek adapter will not be available.")
+# Initialize OpenAI adapter if available
+if has_openai:
+    openai_api_key = getattr(settings, "OPENAI_API_KEY", None)
+    if openai_api_key and openai_api_key != "your_api_key_here":
+        try:
+            adapters["openai_chat"] = OpenAIAdapter(openai_api_key)
+            logger.info("OpenAI adapter initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI adapter: {e}")
+    else:
+        logger.warning("OpenAI API key not configured. OpenAI adapter will not be available.")
 
-if settings.GOOGLE_API_KEY and settings.GOOGLE_API_KEY != "your_api_key_here":
-    # Assuming GeminiAdapter is updated to match BaseAdapter interface
-    # adapters["gemini_chat"] = GeminiAdapter(settings.GOOGLE_API_KEY)
-    # For now, let's keep the old way if it's not updated yet, or comment out
-    pass # Placeholder for GeminiAdapter instantiation if it's updated
-else:
-    logger.warning("Google API key not configured. Gemini adapter will not be available.")
+# Initialize DeepSeek adapter if available
+if has_deepseek:
+    deepseek_api_key = getattr(settings, "DEEPSEEK_API_KEY", None)
+    if deepseek_api_key and deepseek_api_key != "your_api_key_here":
+        try:
+            adapters["deepseek_chat"] = DeepSeekAdapter(deepseek_api_key)
+            logger.info("DeepSeek adapter initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize DeepSeek adapter: {e}")
+    else:
+        logger.warning("DeepSeek API key not configured. DeepSeek adapter will not be available.")
+
+# Initialize Gemini adapter if available
+if has_gemini:
+    gemini_api_key = getattr(settings, "GEMINI_API_KEY", None)
+    if gemini_api_key and gemini_api_key != "your_api_key_here":
+        try:
+            adapters["gemini_chat"] = GeminiAdapter(gemini_api_key)
+            logger.info("Gemini adapter initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini adapter: {e}")
+    else:
+        logger.warning("Google Gemini API key not configured. Gemini adapter will not be available.")
+
+# If no adapters are available, log a warning
+if not adapters:
+    logger.warning("No AI model adapters are available. The worker will simulate responses only.")
 
 
 def calculate_duration(start_time: datetime, end_time: datetime) -> str:
@@ -60,15 +99,57 @@ def calculate_workflow_progress(workflow) -> int:
     total_steps = len(workflow.steps)
     return int((completed_steps / total_steps) * 100)
 
-# --- This is the corrected execute_node function from your code ---
+# --- Enhanced execute_node function with adapter routing ---
 async def execute_node(node_id: str, action: str, params: dict) -> tuple[any, str | None, dict | None]:
     """Execute a node by routing to the correct adapter based on the action."""
     logger.info(f"Executing node {node_id} with action '{action}'")
-    # This part needs to be adapted based on which adapters you have implemented
-    # For now, we'll keep the simulation logic from Phase 2
-    await asyncio.sleep(2)
-    output_sim = { "result": "simulated_success", "action": action }
-    metadata = { "simulated": True, "cost": 0.001, "tokens": 100 }
+    
+    # Check if we have an adapter for this action
+    if action in adapters:
+        try:
+            adapter = adapters[action]
+            logger.info(f"Using {action} adapter for node {node_id}")
+            
+            # Assume all adapters have a common interface for processing
+            # This will need to be adjusted based on your actual adapter implementation
+            result = await adapter.process(params)
+            
+            # Extract output, error, and metadata from result
+            # Format will depend on your adapter implementation
+            output = result.get("output", {})
+            error = result.get("error")
+            metadata = result.get("metadata", {"cost": 0.0, "tokens": 0})
+            
+            return output, error, metadata
+            
+        except Exception as e:
+            logger.error(f"Error executing node {node_id} with {action} adapter: {e}", exc_info=True)
+            return {}, f"Adapter execution error: {str(e)}", {"error": True}
+    
+    # Fallback to simulation if no adapter is available for this action
+    logger.warning(f"No adapter available for action '{action}'. Using simulation mode.")
+    await asyncio.sleep(2)  # Simulate processing time
+    
+    # Create simulated output based on action type
+    output_sim = {
+        "result": f"Simulated output for {action}",
+        "action": action,
+        "params_received": params
+    }
+    
+    # Add some custom fields based on action type to make simulation more realistic
+    if "chat" in action:
+        output_sim["message"] = "This is a simulated AI response. The actual adapter is not available."
+    elif "data" in action:
+        output_sim["data"] = {"sample": "This is simulated data processing output."}
+    
+    metadata = {
+        "simulated": True,
+        "cost": 0.001,
+        "tokens": 100,
+        "simulation_reason": "No adapter available for this action"
+    }
+    
     return output_sim, None, metadata
 
 # --- This is the complete and corrected run_worker function ---

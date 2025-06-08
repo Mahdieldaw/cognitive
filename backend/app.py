@@ -1,19 +1,19 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from models.workflow import Workflow, JobStatus, WorkflowStep
+from .models.workflow import Workflow, JobStatus, WorkflowStep
 from datetime import datetime
 from typing import List
 import uuid
 import asyncio
 from loguru import logger
 from pathlib import Path
-from config import settings
-from services.state_manager import StateManager
-from services.queue_service import queue
-from worker import run_worker
-from recovery_manager import RecoveryManager
-from models.external_data import ExternalDataRequest, ExternalDataResponse
+from .config import settings
+from .services.state_manager import StateManager
+from .services.queue_service import queue
+from .worker import run_worker
+from .recovery_manager import RecoveryManager
+from .models.external_data import ExternalDataRequest, ExternalDataResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
