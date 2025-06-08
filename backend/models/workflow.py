@@ -25,6 +25,8 @@ class WorkflowStep(BaseModel):
     duration: Optional[str] = None  # "1 min 30 sec"
     logs: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+    on_failure: Optional[str] = 'stop_workflow' # Literal['stop_workflow', 'continue'] - Pydantic v1 doesn't easily support Literal with str, Enum
+    params: Optional[Dict[str, Any]] = None
 
 class Workflow(BaseModel):
     id: str
